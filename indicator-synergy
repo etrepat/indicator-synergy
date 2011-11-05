@@ -1,0 +1,424 @@
+#!/usr/bin/python
+# coding: utf-8
+#
+# A simple synergy client indicator applet
+#
+# Estanislau Trepat :: estanis@etrepat.com :: @etrepat :: etrepat.com
+# Released under the MIT License.
+#
+import sys
+import os
+import socket
+import shutil
+import time
+import subprocess
+import json
+
+import logging
+logging.basicConfig(file=sys.stderr,level=logging.INFO)
+
+import gobject
+import gtk
+import appindicator
+
+VERSION='0.1.1'
+
+class Shell:
+    def execute(self, command):
+        output = None
+
+        try:
+            output = subprocess.Popen(command, stdout=subprocess.PIPE, shell=True).communicate()
+        except:
+            logging.error('error running:' + command)
+
+        return output
+
+class IndicatorSynergySettings:
+    SETTINGS_FILE   = os.getenv('HOME') + '/.config/indicator-synergy/settings.json'
+
+    AUTOSTART_PATH  = os.getenv("HOME") + '/.config/autostart/indicator-synergy.desktop'
+    DESKTOP_PATH    = '/usr/share/applications/indicator-synergy.desktop'
+
+    def __init__(self):
+        self.options = dict()
+        self.default_synergy_client = None
+        self.build_defaults()
+
+    def get(self, category, key):
+        if category in self.options:
+            return self.options[category].get(key)
+        else:
+            return None
+
+    def get_category(self, category):
+        return self.options.get(category, None)
+
+    def set(self, category, key, value):
+        if category not in self.options:
+            self.options[category] = dict()
+        self.options[category][key] = value
+
+    def save(self):
+        try:
+            with open(IndicatorSynergySettings.SETTINGS_FILE, 'w') as f:
+                f.write(json.dumps(self.options))
+            self.update_autostart()
+        except Exception, e:
+            logging.exception(e)
+            logging.error('save settings failed')
+
+    def load(self):
+        self.ensure_settings_exist()
+
+        try:
+            with open(IndicatorSynergySettings.SETTINGS_FILE, 'r') as f:
+                self.options = json.load(f)
+        except Exception, e:
+            logging.exception(e)
+            logging.error('load settings failed')
+
+    def build_defaults(self):
+        # general
+        self.set('general', 'start_on_startup', False)
+        # synergy client config
+        self.set('synergy_client', 'binary_path', self.default_client_binary())
+        self.set('synergy_client', 'client_name', socket.gethostname().upper())
+        self.set('synergy_client', 'server_host', '127.0.0.1')
+        self.set('synergy_client', 'server_port', 28400)
+        # keyboard mapping config
+        self.set('keyboard', 'force_mapping', False)
+        self.set('keyboard', 'layout', 'us')
+
+    def ensure_settings_exist(self):
+        path = os.path.dirname(IndicatorSynergySettings.SETTINGS_FILE)
+        if not os.path.exists(path):
+            os.makedirs(path)
+            self.save()
+
+    def default_client_binary(self):
+        if self.default_synergy_client == None:
+            self.default_synergy_client = Shell().execute('which synergyc')[0].strip("\n")
+        return self.default_synergy_client
+
+    def update_autostart(self):
+        autostart = self.get('general', 'start_on_startup')
+        if autostart:
+            try:
+                shutil.copy(IndicatorSynergySettings.DESKTOP_PATH, IndicatorSynergySettings.AUTOSTART_PATH)
+            except Exception, e:
+                logging.exception(e)
+        else:
+            try:
+                os.remove(IndicatorSynergySettings.AUTOSTART_PATH)
+            except Exception, e:
+                pass
+
+class KeyboardLayout:
+    def __init__(self):
+        self.binary_path = '/usr/bin/setxkbmap'
+
+    def map(self, layout='us'):
+        logging.info('forcing keyboard layout to: ' + layout)
+        command = self.binary_path + ' ' + layout
+        return Shell().execute(command)
+
+class SynergyClient:
+    def __init__(self, opts=dict()):
+        self.set_options(opts)
+
+    def start(self):
+        logging.info('launching synergy client')
+        command = self.binary_path + ' -n ' + self.client_name + ' ' + self.server_host + ':' + str(self.server_port)
+        return Shell().execute(command)
+
+    def stop(self):
+        logging.info('stopping synergy client process (if any)')
+        command = 'killall -q ' + self.binary_path.split('/')[-1]
+        return Shell().execute(command)
+
+    def restart(self):
+        self.stop()
+        time.sleep(1)
+        self.start()
+
+    def is_running(self):
+        client_binary = self.binary_path.split('/')[-1]
+
+        command = 'ps -eo comm | grep ' + client_binary
+        output  = Shell().execute(command)[0].strip()
+
+        running = bool(output != '')
+        logging.info('checking if synergy process is running: ' + str(running))
+        return running
+
+    def set_options(self, opts=dict()):
+        self.binary_path = opts['binary_path']
+        self.client_name = opts['client_name']
+        self.server_host = opts['server_host']
+        self.server_port = opts['server_port']
+
+class PreferencesDialog(gtk.Window):
+    def __init__(self, parent):
+        gtk.Window.__init__(self)
+
+        # Indicator applet reference
+        self.indicator = parent
+        # Settings
+        self.settings = self.indicator.settings
+
+        # Window config
+        self.set_title('Preferences')
+        self.set_resizable(False)
+        self.connect('delete-event', self.on_close)
+
+        # UI controls
+        prefs_pane = gtk.VBox(spacing=10)
+        prefs_pane.set_border_width(10)
+
+        self.chk_autostart = gtk.CheckButton('Start synergy client at startup')
+        prefs_pane.pack_start(self.chk_autostart, expand=False)
+
+        fr1 = gtk.Frame('Synergy client binary path')
+        vb1 = gtk.VBox(spacing=10)
+        vb1.set_border_width(10)
+
+        self.txt_client_binary_path = gtk.Entry()
+        vb1.pack_start(self.txt_client_binary_path)
+        fr1.add(vb1)
+        prefs_pane.pack_start(fr1)
+
+        fr2 = gtk.Frame('Client screen name')
+        vb2 = gtk.VBox(spacing=10)
+        vb2.set_border_width(10)
+
+        self.txt_client_name = gtk.Entry()
+        vb2.pack_start(self.txt_client_name)
+        fr2.add(vb2)
+        prefs_pane.pack_start(fr2)
+
+        fr3 = gtk.Frame('Server settings')
+        hb1 = gtk.HBox(spacing=10)
+        hb1.set_border_width(10)
+
+        label_server_host = gtk.Label('Host')
+        label_server_host.set_alignment(0, 0.5)
+        hb1.pack_start(label_server_host)
+
+        self.txt_server_host = gtk.Entry()
+        hb1.pack_start(self.txt_server_host)
+
+        label_server_port = gtk.Label('Port')
+        label_server_port.set_alignment(0, 0.5)
+        hb1.pack_start(label_server_port, expand=False)
+
+        self.txt_server_port = gtk.Entry(max=5)
+        self.txt_server_port.set_width_chars(5)
+        hb1.pack_start(self.txt_server_port, expand=False)
+
+        fr3.add(hb1)
+        prefs_pane.pack_start(fr3)
+
+        fr4 = gtk.Frame('Keyboard mapping')
+        hb2 = gtk.HBox(spacing=10)
+        hb2.set_border_width(10)
+
+        self.chk_force_mapping = gtk.CheckButton('Force keyboard layout')
+        self.chk_force_mapping.connect('toggled', self.on_force_mapping_toggle)
+        hb2.pack_start(self.chk_force_mapping, expand=False)
+
+        self.txt_keyboard_layout = gtk.Entry(max=5)
+        self.txt_keyboard_layout.set_width_chars(5)
+        self.txt_keyboard_layout.set_editable(False)
+        hb2.pack_start(self.txt_keyboard_layout, expand=False)
+
+        fr4.add(hb2)
+        prefs_pane.pack_start(fr4)
+
+        notebook = gtk.Notebook()
+        notebook.append_page(prefs_pane, gtk.Label('General'))
+
+        buttons = gtk.HButtonBox()
+        buttons.set_layout(gtk.BUTTONBOX_END)
+        buttons.set_spacing(5)
+
+        save_button = gtk.Button(stock=gtk.STOCK_SAVE)
+        save_button.connect('clicked', self.on_save)
+        buttons.pack_start(save_button)
+
+        cancel_button = gtk.Button(stock=gtk.STOCK_CANCEL)
+        cancel_button.connect('clicked', self.on_cancel)
+        buttons.pack_end(cancel_button)
+
+        container = gtk.VBox(spacing=10)
+        container.set_border_width(10)
+        container.pack_start(notebook)
+        container.pack_end(buttons, expand=False)
+
+        self.add(container)
+
+    def run(self):
+        self.set_position(gtk.WIN_POS_CENTER_ALWAYS)
+        self.show_all()
+        self.load_settings()
+        gtk.main()
+
+    def close(self):
+        self.hide()
+        gtk.main_quit()
+
+    def on_close(self, event=None, data=None):
+        self.close()
+        return False
+
+    def on_save(self, event=None, data=None):
+        self.save_settings()
+        self.on_close(event, data)
+
+    def on_cancel(self, event=None, data=None):
+        self.settings.load()
+        self.on_close(event, data)
+
+    def on_force_mapping_toggle(self, event=None, data=None):
+        active = self.chk_force_mapping.get_active()
+        self.txt_keyboard_layout.set_editable(active)
+        if active:
+            self.txt_keyboard_layout.grab_focus()
+
+    def load_settings(self):
+        self.settings.load()
+        self.chk_autostart.set_active(self.settings.get('general', 'start_on_startup'))
+        self.txt_client_binary_path.set_text(self.settings.get('synergy_client', 'binary_path'))
+        self.txt_client_name.set_text(self.settings.get('synergy_client', 'client_name'))
+        self.txt_server_host.set_text(self.settings.get('synergy_client', 'server_host'))
+        self.txt_server_port.set_text(str(self.settings.get('synergy_client', 'server_port')))
+        self.chk_force_mapping.set_active(self.settings.get('keyboard', 'force_mapping'))
+        self.txt_keyboard_layout.set_text(self.settings.get('keyboard', 'layout'))
+        self.txt_keyboard_layout.set_editable(self.chk_force_mapping.get_active())
+
+    def save_settings(self):
+        self.settings.set('general', 'start_on_startup', self.chk_autostart.get_active())
+        self.settings.set('synergy_client', 'binary_path', self.txt_client_binary_path.get_text())
+        self.settings.set('synergy_client', 'client_name', self.txt_client_name.get_text())
+        self.settings.set('synergy_client', 'server_host', self.txt_server_host.get_text())
+        self.settings.set('synergy_client', 'server_port', int(self.txt_server_port.get_text()))
+        self.settings.set('keyboard', 'force_mapping', self.chk_force_mapping.get_active())
+        self.settings.set('keyboard', 'layout', self.txt_keyboard_layout.get_text())
+        self.settings.save()
+        self.indicator.on_settings_saved()
+
+class IndicatorSynergy:
+    def __init__(self):
+        self.indicator = appindicator.Indicator('indicator-synergy', 'network-receive',
+            appindicator.CATEGORY_APPLICATION_STATUS)
+        self.indicator.set_status(appindicator.STATUS_ACTIVE)
+
+        self.menu_setup()
+        self.indicator.set_menu(self.menu)
+
+        self.settings = IndicatorSynergySettings()
+        self.settings.load()
+
+        self.keyboard_layout = KeyboardLayout()
+
+        self.client = SynergyClient(self.settings.get_category('synergy_client'))
+        self.client_running = False
+        self.update_status()
+
+    def main(self):
+        try:
+            self.start_synergy_client()
+            gtk.main()
+        except KeyboardInterrupt:
+            self.quit()
+
+    def quit(self):
+        try:
+            self.stop_synergy_client()
+            gtk.main_quit()
+        except RuntimeError:
+            pass
+
+    def menu_setup(self):
+        self.menu = gtk.Menu()
+
+        self.status_menu_item = gtk.MenuItem()
+        #self.status_menu_item.set_label('Synergy client status: unknown')
+        self.status_menu_item.set_state(gtk.STATE_INSENSITIVE)
+        self.menu.add(self.status_menu_item)
+
+        self.menu.add(gtk.SeparatorMenuItem())
+
+        self.start_menu_item = gtk.MenuItem('Start')
+        self.start_menu_item.set_sensitive(False)
+        self.start_menu_item.connect('activate', self.start_synergy_client)
+        self.menu.add(self.start_menu_item)
+
+        self.stop_menu_item = gtk.MenuItem('Stop')
+        self.start_menu_item.set_sensitive(False)
+        self.stop_menu_item.connect('activate', self.stop_synergy_client)
+        self.menu.add(self.stop_menu_item)
+
+        self.restart_menu_item = gtk.MenuItem('Restart')
+        self.start_menu_item.set_sensitive(False)
+        self.restart_menu_item.connect('activate', self.restart_synergy_client)
+        self.menu.add(self.restart_menu_item)
+
+        self.menu.add(gtk.SeparatorMenuItem())
+
+        pref_item = gtk.ImageMenuItem(stock_id=gtk.STOCK_PREFERENCES)
+        pref_item.connect('activate', self.on_preferences)
+        self.menu.add(pref_item)
+
+        quit_item = gtk.ImageMenuItem(stock_id=gtk.STOCK_QUIT)
+        quit_item.connect('activate', self.on_quit)
+        self.menu.add(quit_item)
+
+        self.menu.show_all()
+
+    def on_preferences(self, event=None):
+        self.prefs_dialog = PreferencesDialog(self)
+        self.prefs_dialog.run()
+
+    def on_quit(self, event=None):
+        self.quit()
+
+    def on_settings_saved(self, event=None):
+        self.client.set_options(self.settings.get_category('synergy_client'))
+        if self.client_running:
+            self.restart_synergy_client(event)
+
+    def start_synergy_client(self, event=None):
+        if not self.client_running:
+            if self.settings.get('keyboard', 'force_mapping'):
+                self.keyboard_layout.map(self.settings.get('keyboard', 'layout'))
+            self.client.start()
+            self.update_status()
+
+    def stop_synergy_client(self, event=None):
+        self.client.stop()
+        time.sleep(1)
+        self.update_status()
+
+    def restart_synergy_client(self, event=None):
+        self.client.stop()
+        time.sleep(1)
+        self.start_synergy_client(event)
+
+    def update_status(self):
+        self.client_running = self.client.is_running()
+
+        if self.client_running:
+            self.status_menu_item.set_label('Synergy client status: Running')
+            self.start_menu_item.set_sensitive(False)
+            self.stop_menu_item.set_sensitive(True)
+            self.restart_menu_item.set_sensitive(True)
+        else:
+            self.status_menu_item.set_label('Synergy client status: Stopped')
+            self.start_menu_item.set_sensitive(True)
+            self.stop_menu_item.set_sensitive(False)
+            self.restart_menu_item.set_sensitive(False)
+
+if __name__ == "__main__":
+    indicator = IndicatorSynergy()
+    indicator.main()
