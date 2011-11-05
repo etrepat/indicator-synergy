@@ -1,4 +1,4 @@
-## Indicator-Synergy
+# Indicator-Synergy
 
 A *very* simple ubuntu application indicator for managing the Synergy
 client software.
@@ -23,9 +23,9 @@ synergy config.
 
 ### License
 
-*Indicatory-Synergy* is released under the terms of the
+*Indicator-Synergy* is released under the terms of the
 [MIT License](http://www.opensource.org/licenses/mit-license.php).
 
 ---
 
-Coded in a rush by Estanislau Trepat :: estanis@etrepat.com :: @etrepat :: [etrepat.com](http://etrepat.com)
+Coded in a rush by Estanislau Trepat :: estanis@etrepat.com :: [@etrepat](http://twitter.com/etrepat) :: [etrepat.com](http://etrepat.com)
