@@ -123,40 +123,59 @@ class KeyboardLayout:
         command = self.binary_path + ' ' + layout
         return Shell().execute(command)
 
-class SynergyClient:
+class SynergyClient(gobject.GObject):
     def __init__(self, opts=dict()):
+        gobject.GObject.__init__(self)
         self.set_options(opts)
 
     def start(self):
         logging.info('launching synergy client')
+
         command = self.binary_path + ' -n ' + self.client_name + ' ' + self.server_host + ':' + str(self.server_port)
-        return Shell().execute(command)
+        output = Shell().execute(command)
+        time.sleep(0.5)
+
+        self.emit('status-change', self.is_running())
+        return output
 
     def stop(self):
         logging.info('stopping synergy client process (if any)')
+
         command = 'killall -q ' + self.binary_path.split('/')[-1]
-        return Shell().execute(command)
+        output = Shell().execute(command)
+        time.sleep(0.5)
+
+        self.emit('status-change', self.is_running())
+        return output
 
     def restart(self):
         self.stop()
-        time.sleep(1)
         self.start()
 
     def is_running(self):
         client_binary = self.binary_path.split('/')[-1]
-
         command = 'ps -eo comm | grep ' + client_binary
-        output  = Shell().execute(command)[0].strip()
 
-        running = bool(output != '')
-        logging.info('checking if synergy process is running: ' + str(running))
-        return running
+        output  = Shell().execute(command)[0].strip("\n").strip()
+        return bool(output != '')
 
     def set_options(self, opts=dict()):
         self.binary_path = opts['binary_path']
         self.client_name = opts['client_name']
         self.server_host = opts['server_host']
         self.server_port = opts['server_port']
+
+    def get_options(self):
+        opts = dict()
+        opts['binary_path'] = self.binary_path
+        opts['client_name'] = self.client_name
+        opts['server_host'] = self.server_host
+        opts['server_port'] = self.server_port
+
+        return opts
+
+gobject.type_register(SynergyClient)
+gobject.signal_new('status-change', SynergyClient, gobject.SIGNAL_ACTION, gobject.TYPE_NONE, (gobject.TYPE_BOOLEAN,))
 
 class PreferencesDialog(gtk.Window):
     def __init__(self, parent):
@@ -273,6 +292,7 @@ class PreferencesDialog(gtk.Window):
 
     def on_save(self, event=None, data=None):
         self.save_settings()
+        self.emit('settings-saved')
         self.on_close(event, data)
 
     def on_cancel(self, event=None, data=None):
@@ -305,7 +325,8 @@ class PreferencesDialog(gtk.Window):
         self.settings.set('keyboard', 'force_mapping', self.chk_force_mapping.get_active())
         self.settings.set('keyboard', 'layout', self.txt_keyboard_layout.get_text())
         self.settings.save()
-        self.indicator.on_settings_saved()
+
+gobject.signal_new('settings-saved', PreferencesDialog, gobject.SIGNAL_ACTION, gobject.TYPE_NONE, ())
 
 class IndicatorSynergy:
     def __init__(self):
@@ -322,8 +343,8 @@ class IndicatorSynergy:
         self.keyboard_layout = KeyboardLayout()
 
         self.client = SynergyClient(self.settings.get_category('synergy_client'))
-        self.client_running = False
-        self.update_status()
+        self.client.connect('status-change', self.on_client_status_change)
+        self.on_client_status_change(self.client, self.client.is_running())
 
     def main(self):
         try:
@@ -343,7 +364,6 @@ class IndicatorSynergy:
         self.menu = gtk.Menu()
 
         self.status_menu_item = gtk.MenuItem()
-        #self.status_menu_item.set_label('Synergy client status: unknown')
         self.status_menu_item.set_state(gtk.STATE_INSENSITIVE)
         self.menu.add(self.status_menu_item)
 
@@ -378,46 +398,51 @@ class IndicatorSynergy:
 
     def on_preferences(self, event=None):
         self.prefs_dialog = PreferencesDialog(self)
+        self.prefs_dialog.connect('settings-saved', self.on_settings_saved)
         self.prefs_dialog.run()
 
     def on_quit(self, event=None):
         self.quit()
 
     def on_settings_saved(self, event=None):
-        self.client.set_options(self.settings.get_category('synergy_client'))
-        if self.client_running:
-            self.restart_synergy_client(event)
+        logging.info('settings saved')
+        # update client options & restart if needed
+        old_client_opts = self.client.get_options()
+        new_client_opts = self.settings.get_category('synergy_client')
+        if old_client_opts != new_client_opts:
+            self.client.set_options(new_client_opts)
+            if self.client_running:
+                self.client.restart()
+
+    def on_client_status_change(self, client=None, running=None):
+        logging.info('client status change. Running? => ' + str(running))
+
+        # update status vble
+        self.client_running = running
+
+        # change menu items accordingly
+        if running:
+            self.status_menu_item.set_label('Synergy Client: Running')
+            self.start_menu_item.set_sensitive(False)
+            self.stop_menu_item.set_sensitive(True)
+            self.restart_menu_item.set_sensitive(True)
+        else:
+            self.status_menu_item.set_label('Synergy Client: Stopped')
+            self.start_menu_item.set_sensitive(True)
+            self.stop_menu_item.set_sensitive(False)
+            self.restart_menu_item.set_sensitive(False)
 
     def start_synergy_client(self, event=None):
         if not self.client_running:
             if self.settings.get('keyboard', 'force_mapping'):
                 self.keyboard_layout.map(self.settings.get('keyboard', 'layout'))
             self.client.start()
-            self.update_status()
 
     def stop_synergy_client(self, event=None):
         self.client.stop()
-        time.sleep(1)
-        self.update_status()
 
     def restart_synergy_client(self, event=None):
-        self.client.stop()
-        time.sleep(1)
-        self.start_synergy_client(event)
-
-    def update_status(self):
-        self.client_running = self.client.is_running()
-
-        if self.client_running:
-            self.status_menu_item.set_label('Synergy client status: Running')
-            self.start_menu_item.set_sensitive(False)
-            self.stop_menu_item.set_sensitive(True)
-            self.restart_menu_item.set_sensitive(True)
-        else:
-            self.status_menu_item.set_label('Synergy client status: Stopped')
-            self.start_menu_item.set_sensitive(True)
-            self.stop_menu_item.set_sensitive(False)
-            self.restart_menu_item.set_sensitive(False)
+        self.client.restart()
 
 if __name__ == "__main__":
     indicator = IndicatorSynergy()
