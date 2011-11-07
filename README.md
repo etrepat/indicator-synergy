@@ -1,4 +1,4 @@
-## Indicator-Synergy
+# Indicator-Synergy
 
 A *very* simple ubuntu application indicator for managing the Synergy
 client software.
@@ -34,4 +34,4 @@ calls (shame on me...).
 
 ---
 
-Coded in a rush by Estanislau Trepat :: estanis@etrepat.com :: @etrepat :: [etrepat.com](http://etrepat.com)
+Coded in a rush by Estanislau Trepat :: estanis@etrepat.com :: [@etrepat](http://twitter.com/etrepat) :: [etrepat.com](http://etrepat.com)
