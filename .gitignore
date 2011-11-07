@@ -1,2 +1,7 @@
+build
 *.sublime-project
 *.sublime-workspace
+*.deb
+*.changes
+*.dsc
+*.tar.gz

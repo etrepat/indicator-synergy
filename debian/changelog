@@ -1,0 +1,11 @@
+indicator-synergy (0.1-2) oneiric; urgency=low
+
+  * added packaging scripts & bundled nice debian package + sources
+
+ -- Estanislau Trepat (etrepat) <estanis@etrepat.com>  Mon, 07 Nov 2011 17:50:01 +0100
+
+indicator-synergy (0.1-1) oneiric; urgency=low
+
+  * initial release
+
+ -- Estanislau Trepat (etrepat) <estanis@etrepat.com>  Mon, 07 Nov 2011 13:17:01 +0100

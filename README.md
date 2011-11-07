@@ -3,27 +3,33 @@
 A *very* simple ubuntu application indicator for managing the Synergy
 client software.
 
-Please note, that it's still a work-in-progress.
-
 ### Installation
 
-For now, just clone the repo and run `sudo make install` from the project's root. A nice
-deb package is on the way.
+For now, there are two recommended ways of installing *indicator-synergy*:
 
-On the first run, you should enter the prefereces pane and adapt it to your local
-synergy config.
+1. Clone the repo and run `sudo make install` from the project's root.
+2. Download & install the debian package from the project's [downloads section](https://github.com/etrepat/indicator-synergy/downloads) or
+from [here](https://github.com/downloads/etrepat/indicator-synergy/indicator-synergy_0.1-2_all.deb).
+
+#### Post-install notes:
+
+* The indicator will install itself in the `usr/bin` directory.
+* On the first run, you should enter the preferences pane and adapt it to match
+your local synergy config. You may also configure the indicator to start the
+synergy client at startup.
 
 ### TODO
 
-* Avoid blocking `sleep` calls. They actually do the job but block the UI.
 * Prepare a nice icon for the indicator.
-* Prepare a debian package and a debian package building script
-* Support for internationalization
-* Maybe add libnotify support ?¿
+* Add internationalization support.
+* Re-think the synergy client interface so it doesn't use those "nasty" `time.sleep`
+calls (shame on me...).
+* Add support for configuring & managing the synergy server too.
+* A PPA would be nice...
 
 ### License
 
-*Indicatory-Synergy* is released under the terms of the
+*Indicator-Synergy* is released under the terms of the
 [MIT License](http://www.opensource.org/licenses/mit-license.php).
 
 ---

@@ -1,0 +1,15 @@
+Source: indicator-synergy
+Section: gnome
+Priority: extra
+Maintainer: Estanislau Trepat <estanis@etrepat.com>
+Build-Depends: debhelper (>= 7), cdbs, python, python-central
+Standards-Version: 3.9.1
+XS-Python-Version: >=2.6
+Homepage: https://github.com/etrepat/indicator-synergy
+
+Package: indicator-synergy
+Architecture: all
+Depends: ${misc:Depends}, python, python-appindicator, python-gnome2
+Suggests: synergy
+Description: Indicator for Synergy client
+  A very simple application indicator for managing the Synergy client software.

@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=Synergy client Indicator
-Comment=Simple synergy client indicator applet
+Comment=A simple synergy client indicator applet
 Exec=indicator-synergy
 Terminal=false
 StartupNotify=true
